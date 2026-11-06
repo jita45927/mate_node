@@ -1,10 +1,12 @@
 # Mate Node - ComfyUI 自定义节点包
 
-包含四个节点：**捏脸提示词生成器**（标签化拼接，三路输出）、**加载图像外补/裁剪**（可视化画板定义输出区域）、**随机提示词权重**（逐片段随机加权）与 **Image Blur + Noise**（模糊 + 噪点）。
+包含六个节点：**捏脸提示词生成器**、**国风发型/发饰提示词生成器**（标签化拼接，三路输出）、**文本换行连接**（多段文本合并）、**加载图像外补/裁剪**（可视化画板定义输出区域）、**随机提示词权重**（逐片段随机加权）与 **Image Blur + Noise**（模糊 + 噪点）。
 
 | 节点 | 分类 | 用途 |
 |---|---|---|
 | 捏脸提示词生成器 (Mate) | Mate/捏脸 | 下拉标签 → 中文 / 英文 / SD 短 tag 三路提示词 |
+| 国风发型/发饰提示词生成器 (Mate) | Mate/国风 | 按性别切换选项的国风发型 / 配饰标签 → 三路提示词 |
+| 文本换行连接 (Mate) | utils/text | 多段文本按顺序换行合并，连接后自动增加备用输入口 |
 | 加载图像外补/裁剪 (Mate) | Mate/image | 画板方框定义外补或裁剪区域，输出图像、遮罩与尺寸 |
 | 随机提示词权重 | utils/text | 按逗号拆分为每个片段随机分配 `(片段:权重)` |
 | Image Blur + Noise | image/effects | 对图像做高斯模糊并叠加噪点 |
@@ -44,17 +46,21 @@ SD1.5/SDXL 使用 CLIP 文本编码器，存在 **75 token 上限**，且只对�
 ComfyUI/custom_nodes/mate_node/
 ├── __init__.py
 ├── nodes.py
+├── guofeng_hairstyle.py
+├── text_join.py
 ├── image_pad_crop.py
 ├── random_prompt_weights.py
 ├── blur_noise_node.py
 ├── translate.py
 ├── requirements.txt
 ├── web/
-│   └── image_pad_crop.js
+│   ├── image_pad_crop.js
+│   ├── guofeng_hairstyle.js
+│   └── text_join.js
 └── README.md
 ```
 
-节点位置：右键菜单 → **Mate/捏脸**、**Mate/image**、**utils/text**、**image/effects**，也可在画布上双击搜索节点名称。
+节点位置：右键菜单 → **Mate/捏脸**、**Mate/国风**、**Mate/image**、**utils/text**、**image/effects**，也可在画布上双击搜索节点名称。
 
 ## 使用
 
@@ -165,15 +171,55 @@ ComfyUI/custom_nodes/mate_node/
 
 输出 `IMAGE`。
 
+## 节点五：国风发型/发饰提示词生成器
+
+分类 `Mate/国风`。结构与捏脸提示词生成器一致，同样输出 `prompt_zh` / `prompt_en` / `tags_en` 三路提示词。
+
+### 标签顺序
+
+1. **性别**：男性发型 / 女性发型
+2. **朝代**：汉代发型、魏晋南北朝发型、唐代发型、宋代发型、明代发型、清代发型、民国发型、仙侠玄幻发型、架空古风发型
+3. **发型**：按朝代覆盖的高髻、盘发、低髻、双丫髻，唐代堕马髻 / 双环望仙髻 / 灵蛇髻 / 凌云髻 / 十字髻 / 倭堕髻 / 飞仙髻，宋代包髻 / 冠梳，明代䯼髻 / 圆髻满插簪钗，清代两把头 / 大拉翅 / 钿子 / 燕尾，民国手推波纹与仙侠披发等
+4. **配饰**：步摇、金步摇、簪、钗、珠钗、珍珠发饰、凤冠、花冠、簪花、花钿、额黄、面帘、发带丝绦、流苏、玉簪、点翠、梳篦等
+5. **发丝质感**：顺滑、柔顺垂坠、蓬松轻盈、松散碎发、风吹飘动、缎面光泽、微卷蓬松
+6. **气质**：端庄典雅、温婉柔美、清冷出尘、雍容华贵、英气飒爽、仙气飘飘等
+7. **其他**：自由文本输入，可配合「翻译其他为英文」开关
+
+### 性别联动
+
+选择「男性发型」时，朝代后的发型、配饰、发丝质感、气质下拉框只列出男性选项；切换到「女性发型」后立即切换为女性选项。
+
+切换性别时，若已选值不属于新性别，会自动回落到该标签的「（不使用）」。已保存的工作流重新加载时，会按保存的性别恢复对应的选项列表。
+
+### 输出示例
+
+| 输出口 | 示例 |
+|---|---|
+| `prompt_zh` | `[朝代]唐代发型`<br>`[发型]唐代飞仙髻，高耸的环状发髻向上翻卷，发丝如云，两侧垂落飘带`<br>`[配饰]金步摇，鎏金垂珠步摇，华贵夺目`<br>`[发丝质感]顺滑长发，发丝根根分明，自然光泽`<br>`[气质]端庄典雅，举止克制，仪态大方` |
+| `prompt_en` | `[Dynasty]Tang dynasty style`<br>`[Hairstyle]flying-immortal bun, towering looped coifs sweeping upward, cloud-like hair, ribbons falling on both sides`<br>`[Hair Ornament]gold buyao hairpin, gilded dangling hairpin with hanging beads`<br>`[Hair Texture]silky hair with detailed strands and natural gloss` |
+| `tags_en` | `tang dynasty, ancient chinese historical style, flying immortal bun, high looped bun, gold buyao hairpin, gilded hairpin, silky hair, detailed hair strands, dignified, elegant` |
+
+## 节点六：文本换行连接
+
+分类 `utils/text`。用于把多个节点生成的提示词合成一段完整文本，例如把捏脸提示词的输出和国风发型提示词的输出连接起来。
+
+- **动态输入口**：初始只有一个 `文本 1` 输入端口；每接入一段文本，下方自动增加一个备用输入端口
+- **顺序拼接**：按 `文本 1`、`文本 2`、`文本 3` … 的顺序，用换行符连接
+- **空文本忽略**：未连接或内容为空的输入不会产生多余空行
+- **上限**：最多 20 段文本同时接入
+- 输出口 `文本`（STRING），可直接连接到 CLIP 文本编码等后续节点
+
+> 输入端的显示名称由前端扩展维护，后端实际输入键为 `text_1` 到 `text_20`；断开某个连接后，其余已连接文本不会被删除。
+
 ## 自定义标签
 
-所有标签定义集中在 [nodes.py](nodes.py) 的 `TAGS` 列表中，数据结构为三元组：
+所有标签定义集中在 [nodes.py](nodes.py)（捏脸）与 [guofeng_hairstyle.py](guofeng_hairstyle.py)（国风发型）的 `TAGS` 列表中，数据结构为三元组：
 
 ```python
 ("中文选项", "英文长句", "SD 短 tag")
 ```
 
-新增标签时，在 `TAGS` 中追加一个字典即可自动出现在节点界面：
+捏脸节点在 `TAGS` 中追加带 `options` 的字典即可自动出现在节点界面：
 
 ```python
 {
@@ -183,6 +229,12 @@ ComfyUI/custom_nodes/mate_node/
         (_SKIP, None, None),   # 默认「（不使用）」
     ],
 },
+```
+
+国风发型节点按性别分组，每个标签使用 `male` / `female` 两份列表：
+
+```python
+{"zh": "朝代", "en": "Dynasty", "male": DYNASTY, "female": DYNASTY},
 ```
 
 ## 环境要求
