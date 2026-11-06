@@ -1,11 +1,13 @@
 # Mate Node - ComfyUI 自定义节点包
 
-包含两个节点：**捏脸提示词生成器**（标签化拼接，三路输出）与 **加载图像外补/裁剪**（可视化画板定义输出区域）。
+包含四个节点：**捏脸提示词生成器**（标签化拼接，三路输出）、**加载图像外补/裁剪**（可视化画板定义输出区域）、**随机提示词权重**（逐片段随机加权）与 **Image Blur + Noise**（模糊 + 噪点）。
 
 | 节点 | 分类 | 用途 |
 |---|---|---|
 | 捏脸提示词生成器 (Mate) | Mate/捏脸 | 下拉标签 → 中文 / 英文 / SD 短 tag 三路提示词 |
 | 加载图像外补/裁剪 (Mate) | Mate/image | 画板方框定义外补或裁剪区域，输出图像、遮罩与尺寸 |
+| 随机提示词权重 | utils/text | 按逗号拆分为每个片段随机分配 `(片段:权重)` |
+| Image Blur + Noise | image/effects | 对图像做高斯模糊并叠加噪点 |
 
 ## 节点一：捏脸提示词生成器
 
@@ -43,6 +45,8 @@ ComfyUI/custom_nodes/mate_node/
 ├── __init__.py
 ├── nodes.py
 ├── image_pad_crop.py
+├── random_prompt_weights.py
+├── blur_noise_node.py
 ├── translate.py
 ├── requirements.txt
 ├── web/
@@ -50,7 +54,7 @@ ComfyUI/custom_nodes/mate_node/
 └── README.md
 ```
 
-节点位置：右键菜单 → **Mate/捏脸** 或 **Mate/image**，也可在画布上双击搜索节点名称。
+节点位置：右键菜单 → **Mate/捏脸**、**Mate/image**、**utils/text**、**image/effects**，也可在画布上双击搜索节点名称。
 
 ## 使用
 
@@ -134,6 +138,32 @@ ComfyUI/custom_nodes/mate_node/
 - Enter 应用，Esc 取消
 
 `x` / `y` / `宽` / `高` 四个数值在节点界面上隐藏，由画板维护并随工作流保存。切换图片时方框自动重置为整张新图；重新打开工作流时保留已保存的方框。
+
+## 节点三：随机提示词权重
+
+分类 `utils/text`。按逗号拆分提示词，为每个片段随机追加权重，写成 `(片段:权重)`，原始文本内容不变。
+
+| 参数 | 说明 |
+|---|---|
+| text | 原始提示词，支持多行 |
+| weight_min / weight_max | 随机权重下限 / 上限，默认 0.7 / 1.3 |
+| exclude | 逗号分隔的片段，匹配到的保持原样、不加权重 |
+| seed | -1 时每次运行权重都不同；固定数值可复现 |
+
+输出 `加权文本`（STRING）。已含 `()` `[]` 权重语法或 `<lora:...>` 尖括号标签的片段会自动跳过，不重复加权。
+
+## 节点四：Image Blur + Noise
+
+分类 `image/effects`。先做高斯模糊、再叠加随机噪点，顺序可通过 `blur_first` 切换。
+
+| 参数 | 说明 |
+|---|---|
+| image | 输入图像 |
+| blur_strength | 模糊强度，0–1，默认 0.1 |
+| noise_strength | 噪点强度，0–1，默认 0.1 |
+| blur_first | 打开时先模糊后噪点，关闭时先噪点后模糊 |
+
+输出 `IMAGE`。
 
 ## 自定义标签
 
