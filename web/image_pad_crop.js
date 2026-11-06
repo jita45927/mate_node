@@ -20,17 +20,9 @@ function clamp(v, min, max) {
 
 function setWidgetHidden(widget, hidden) {
 	if (!widget) return;
-	if (hidden) {
-		if (!widget._mateOrigComputeSize) {
-			widget._mateOrigComputeSize = widget.computeSize;
-			widget._mateOrigDraw = widget.draw;
-		}
-		widget.computeSize = () => [0, -4];
-		widget.draw = () => {};
-	} else if (widget._mateOrigComputeSize) {
-		widget.computeSize = widget._mateOrigComputeSize;
-		widget.draw = widget._mateOrigDraw;
-	}
+	// 前端布局以 widget.hidden 为准（isWidgetVisible/getLayoutWidgets 都会跳过）。
+	// 只设 hidden 而不动 computeSize/draw，既彻底不占位，也不影响取值与序列化。
+	widget.hidden = !!hidden;
 }
 
 function getRect(node) {
@@ -49,8 +41,10 @@ function setRect(node, rect) {
 		w: Math.max(1, Math.round(rect.w)),
 		h: Math.max(1, Math.round(rect.h)),
 	};
+	// 内部字段名 -> 节点上的实际输入名（宽/高 为中文键）
+	const WIDGET_NAMES = { x: "x", y: "y", w: "宽", h: "高" };
 	for (const key of Object.keys(next)) {
-		const w = getWidget(node, key);
+		const w = getWidget(node, WIDGET_NAMES[key]);
 		if (w) w.value = next[key];
 	}
 	node._mateRect = next;
@@ -99,6 +93,15 @@ async function fetchImageURL(value) {
 
 async function loadNodeImage(node, resetRect) {
 	const widget = getWidget(node, "图像");
+	const key = widget?.value ?? "";
+	// 同一张图重复触发（双层事件监听）时直接复用已加载的图像，避免重复请求
+	if (node._mateImg && key === node._mateLoadedValue) {
+		if (resetRect) {
+			setRectToFullImage(node);
+			refreshLayout(node);
+		}
+		return;
+	}
 	node._mateLoadToken = (node._mateLoadToken || 0) + 1;
 	const token = node._mateLoadToken;
 
@@ -142,6 +145,8 @@ async function loadNodeImage(node, resetRect) {
 
 	node._mateImageURL = url;
 	node._mateImg = img;
+	node._mateLoadedValue = key;
+	updatePreviewWidget(node);
 
 	if (resetRect || node._matePendingReset) {
 		node._matePendingReset = false;
@@ -176,81 +181,62 @@ function drawChecker(ctx, x, y, w, h, cell = 10) {
 	ctx.restore();
 }
 
-function drawPreview(ctx, node, width, y, height) {
-	ctx.save();
-	ctx.beginPath();
-	ctx.rect(0, y, width, height);
-	ctx.clip();
-
-	drawChecker(ctx, 0, y, width, height);
-
-	const img = node._mateImg;
-	if (!img) {
-		ctx.fillStyle = "rgba(255,255,255,0.55)";
-		ctx.font = "12px sans-serif";
-		ctx.textAlign = "center";
-		ctx.textBaseline = "middle";
-		ctx.fillText("点击「外补画板」选择图像", width / 2, y + height / 2);
-		ctx.restore();
-		return;
-	}
-
-	const pad = 6;
-	const aw = width - pad * 2;
-	const ah = height - pad * 2;
-	const s = Math.min(aw / img.naturalWidth, ah / img.naturalHeight);
-	const iw = img.naturalWidth * s;
-	const ih = img.naturalHeight * s;
-	const ox = pad + (aw - iw) / 2;
-	const oy = y + pad + (ah - ih) / 2;
-
-	ctx.drawImage(img, ox, oy, iw, ih);
-
-	ctx.strokeStyle = "rgba(255,255,255,0.35)";
-	ctx.lineWidth = 1;
-	ctx.strokeRect(ox + 0.5, oy + 0.5, iw - 1, ih - 1);
-
-	const r = node._mateRect;
-	if (r) {
-		const rx = ox + r.x * s;
-		const ry = oy + r.y * s;
-		const rw = r.w * s;
-		const rh = r.h * s;
-		ctx.setLineDash([4, 3]);
-		ctx.strokeStyle = "#4da3ff";
-		ctx.lineWidth = 1.2;
-		ctx.strokeRect(rx, ry, rw, rh);
-		ctx.setLineDash([]);
-	}
-	ctx.restore();
-}
-
 function createPreviewWidget(node) {
-	const widget = {
-		name: PREVIEW_NAME,
-		type: "mate_preview",
-		value: null,
+	if (node._matePreviewEl) return getWidget(node, PREVIEW_NAME);
+	if (!node.addDOMWidget) return null;
+
+	const holder = document.createElement("div");
+	holder.style.cssText =
+		"width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;";
+	node._matePreviewEl = holder;
+
+	const img = document.createElement("img");
+	img.draggable = false;
+	img.style.cssText = "max-width:100%;max-height:100%;object-fit:contain;display:none;";
+	holder.appendChild(img);
+	node._matePreviewImg = img;
+
+	const hint = document.createElement("div");
+	hint.textContent = "点击「外补画板」选择图像";
+	hint.style.cssText = "color:rgba(255,255,255,0.55);font-size:12px;";
+	holder.appendChild(hint);
+	node._matePreviewHint = hint;
+
+	const widget = node.addDOMWidget(PREVIEW_NAME, "mate_preview", holder, {
 		serialize: false,
-		options: {},
-		_h: 140,
-		computeSize(width) {
+		hideOnZoom: false,
+	});
+	if (widget) {
+		// 高度由图片比例决定，随节点宽度自动适配
+		widget.computeSize = (width) => {
 			const w = Math.max(140, width || node.size?.[0] || 260);
-			const img = node._mateImg;
-			const aspect = img ? img.naturalHeight / img.naturalWidth : 0.62;
-			this._h = Math.max(70, Math.min(420, Math.round(w * aspect)));
-			return [width, this._h];
-		},
-		draw(ctx, n, width, y, height) {
-			drawPreview(ctx, n, width, y, height);
-		},
-	};
-	if (node.addCustomWidget) {
-		node.addCustomWidget(widget);
-	} else {
-		node.widgets = node.widgets || [];
-		node.widgets.push(widget);
+			const image = node._mateImg;
+			const h = image
+				? Math.max(70, Math.min(420, Math.round(w * image.naturalHeight / image.naturalWidth)))
+				: 140;
+			node._matePreviewH = h;
+			if (node._matePreviewEl) node._matePreviewEl.style.height = `${h}px`;
+			return [width, h];
+		};
+		widget.serialize = false;
 	}
 	return widget;
+}
+
+// 图片直接用 DOM <img> 呈现：浏览器会立即重绘，不依赖画布的脏标记刷新
+function updatePreviewWidget(node) {
+	const img = node._matePreviewImg;
+	const hint = node._matePreviewHint;
+	if (!img || !hint) return;
+	if (node._mateImageURL) {
+		img.src = node._mateImageURL;
+		img.style.display = "block";
+		hint.style.display = "none";
+	} else {
+		img.removeAttribute("src");
+		img.style.display = "none";
+		hint.style.display = "block";
+	}
 }
 
 function refreshLayout(node) {
@@ -258,10 +244,24 @@ function refreshLayout(node) {
 }
 
 function relayout(node) {
+	const redraw = () => {
+		node.setDirtyCanvas?.(true, true);
+		node.graph?.setDirtyCanvas?.(true, true);
+		app.canvas?.setDirty?.(true, true);
+		// 直接强制重绘一帧，绕过脏标记（部分前端版本不会因脏标记自动重绘节点）
+		app.canvas?.draw?.(true, true);
+	};
 	requestAnimationFrame(() => {
 		const computed = node.computeSize ? node.computeSize() : [node.size[0], node.size[1]];
-		node.setSize([Math.max(node.size[0], 260), Math.max(computed[1], 120)]);
-		node.setDirtyCanvas(true, true);
+		const w = Math.max(node.size[0], 260);
+		const h = Math.max(computed[1], 120);
+		// 先抖动 1px 再设回目标尺寸，确保尺寸变化事件触发
+		node.setSize([w, h + 1]);
+		node.setSize([w, h]);
+		redraw();
+		// 前端重排是异步的，稍后再补两次重绘，保证图片解码完成后必定可见
+		setTimeout(redraw, 80);
+		setTimeout(redraw, 240);
 	});
 }
 
@@ -269,7 +269,13 @@ function applyLongSideVisibility(node) {
 	const toggle = getWidget(node, "启用长边");
 	const valueWidget = getWidget(node, "长边");
 	if (!toggle || !valueWidget) return;
-	setWidgetHidden(valueWidget, !toggle.value);
+	const enabled = !!toggle.value;
+	valueWidget.hidden = false;
+	valueWidget.options = valueWidget.options || {};
+	valueWidget.options.disabled = !enabled;
+	valueWidget.disabled = !enabled;
+	const el = valueWidget.inputEl || valueWidget.element;
+	if (el) el.disabled = !enabled;
 }
 
 // ---------------------------------------------------------------- 画板编辑器
@@ -894,6 +900,8 @@ const editor = new BoardEditor();
 // ---------------------------------------------------------------- 节点装配
 
 function setupNode(node) {
+	if (node._mateSetupDone) return;
+	node._mateSetupDone = true;
 	node._matePendingReset = true;
 
 	for (const name of HIDDEN_WITH_RECT) {
@@ -903,6 +911,19 @@ function setupNode(node) {
 
 	const button = node.addWidget("button", "外补画板", null, () => editor.open(node));
 	if (button) button.serialize = false;
+
+	// 新版前端会为本节点的 IMAGE 输出在节点上叠加一张结果图预览（DOM 覆盖层），
+	// 与本节点自带的加载图预览重复。hideOutputImages 是该覆盖层的官方开关。
+	node.hideOutputImages = true;
+
+	// ComfyUI 前端在节点产出 IMAGE 后会把执行结果图写入 node.imgs，并据此自动追加
+	// $$canvas-image-preview 内置预览控件（带分辨率标注），与本节点的加载图预览重复。
+	// 内置预览的唯一触发条件是 node.imgs 非空，这里把该属性锁定为空即可彻底阻止。
+	Object.defineProperty(node, "imgs", {
+		get: () => undefined,
+		set: () => {},
+		configurable: true,
+	});
 
 	createPreviewWidget(node);
 
@@ -915,6 +936,18 @@ function setupNode(node) {
 			return r;
 		};
 	}
+
+	// 新版前端通过 onWidgetChanged 派发控件变更，callback 不一定被调用；
+	// 两条通路都监听，确保换图后立刻重新加载并重绘预览。
+	const prevChanged = node.onWidgetChanged;
+	node.onWidgetChanged = function (name, ...rest) {
+		prevChanged?.apply(this, [name, ...rest]);
+		if (name === "图像") loadNodeImage(node, true);
+		if (name === "启用长边") {
+			applyLongSideVisibility(node);
+			relayout(node);
+		}
+	};
 
 	const longSideToggle = getWidget(node, "启用长边");
 	if (longSideToggle) {

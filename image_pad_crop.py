@@ -25,11 +25,32 @@ except Exception:
 FILL_COLORS = {
     "白色": (1.0, 1.0, 1.0),
     "黑色": (0.0, 0.0, 0.0),
+    "灰色": (0.5, 0.5, 0.5),
     "红色": (1.0, 0.0, 0.0),
     "绿色": (0.0, 1.0, 0.0),
     "蓝色": (0.0, 0.0, 1.0),
 }
-BACKGROUND_OPTIONS = ["无", "白色", "黑色", "红色", "绿色", "蓝色"]
+BACKGROUND_OPTIONS = ["无", "白色", "黑色", "灰色", "红色", "绿色", "蓝色"]
+
+
+def feather_mask(mask, radius):
+    """对遮罩做高斯羽化：可分离卷积，边缘复制填充，强度以像素半径计"""
+    r = int(radius)
+    if r <= 0:
+        return mask
+    h, w = mask.shape[-2], mask.shape[-1]
+    r = min(r, max(1, min(h, w) // 2))
+
+    k = torch.arange(-r, r + 1, dtype=torch.float32)
+    sigma = max(r / 3.0, 0.5)
+    k = torch.exp(-(k ** 2) / (2 * sigma ** 2))
+    k = k / k.sum()
+
+    m = mask[:, None]
+    m = torch.nn.functional.pad(m, (r, r, r, r), mode="replicate")
+    m = torch.nn.functional.conv2d(m, k.view(1, 1, 1, -1))
+    m = torch.nn.functional.conv2d(m, k.view(1, 1, -1, 1))
+    return m[:, 0].clamp(0.0, 1.0)
 
 
 class MateImagePadCrop:
@@ -54,6 +75,9 @@ class MateImagePadCrop:
                 "y": ("INT", {"default": 0, "min": -MAX_RESOLUTION, "max": MAX_RESOLUTION, "step": 1}),
                 "宽": ("INT", {"default": 512, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
                 "高": ("INT", {"default": 512, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+                # 放在末尾：已有工作流的 widgets_values 索引不受影响
+                "取整倍数": (["8", "16", "32", "64"], {"default": "8"}),
+                "遮罩羽化": ("INT", {"default": 0, "min": 0, "max": 256, "step": 1}),
             }
         }
 
@@ -71,7 +95,7 @@ class MateImagePadCrop:
             m.update(f.read())
         return m.digest().hex()
 
-    def execute(self, 图像, 启用长边, 长边, 背景填充, x, y, 宽, 高):
+    def execute(self, 图像, 启用长边, 长边, 背景填充, x, y, 宽, 高, 取整倍数="8", 遮罩羽化=0):
         image_path = folder_paths.get_annotated_filepath(图像)
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"找不到图像文件: {image_path}")
@@ -145,6 +169,28 @@ class MateImagePadCrop:
             mask = (scaled > 0.5).float()
         else:
             new_w, new_h = rect_w, rect_h
+
+        # 最终尺寸取整到指定倍数：在右侧 / 底部补充外补区域，内容不平移、不缩放
+        mult = max(1, int(取整倍数))
+        round_w = ((new_w + mult - 1) // mult) * mult
+        round_h = ((new_h + mult - 1) // mult) * mult
+        if round_w != new_w or round_h != new_h:
+            bigger = torch.zeros((1, round_h, round_w, out_ch), dtype=torch.float32)
+            if not transparent:
+                bigger[..., :3] = torch.tensor(
+                    FILL_COLORS.get(背景填充, (0.0, 0.0, 0.0)), dtype=torch.float32
+                )
+            bigger[:, :new_h, :new_w, :] = canvas
+            canvas = bigger
+
+            bigger_mask = torch.ones((1, round_h, round_w), dtype=torch.float32)
+            bigger_mask[:, :new_h, :new_w] = mask
+            mask = bigger_mask
+            new_w, new_h = round_w, round_h
+
+        # 遮罩羽化（只影响 mask，图像本身不变）
+        if int(遮罩羽化) > 0:
+            mask = feather_mask(mask, 遮罩羽化)
 
         return (canvas.contiguous(), mask.contiguous(), new_w, new_h)
 

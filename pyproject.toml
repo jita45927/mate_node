@@ -1,0 +1,20 @@
+[project]
+name = "mate-node"
+description = "ComfyUI 节点包：捏脸提示词生成器（中文 / 英文 / SD 短 tag 三路输出）与加载图像外补/裁剪（可视化画板）"
+version = "1.1.0"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "transformers",
+    "sentencepiece",
+    "sacremoses",
+]
+
+[project.urls]
+Repository = "https://github.com/jita45927/mate_node"
+Issues = "https://github.com/jita45927/mate_node/issues"
+
+[tool.comfy]
+PublisherId = "jita45927"
+DisplayName = "Mate Node"
+Icon = ""
