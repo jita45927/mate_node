@@ -274,7 +274,7 @@ function applyLongSideVisibility(node) {
 	valueWidget.options = valueWidget.options || {};
 	valueWidget.options.disabled = !enabled;
 	valueWidget.disabled = !enabled;
-	const el = valueWidget.inputEl || valueWidget.element;
+	const el = valueWidget.element || valueWidget.inputEl;
 	if (el) el.disabled = !enabled;
 }
 

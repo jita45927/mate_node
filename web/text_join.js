@@ -16,7 +16,8 @@ function syncInputs(node) {
 	const inputs = getTextInputs(node);
 	if (!inputs.length) return;
 
-	const linkedNumbers = inputs.filter((input) => input.link).map(inputNumber);
+	const isConnected = (input) => node.isInputConnected(node.inputs.indexOf(input));
+	const linkedNumbers = inputs.filter(isConnected).map(inputNumber);
 	const linkedSet = new Set(linkedNumbers);
 
 	// 备用槽优先取已连接最大编号之后的第一个空槽，保证它总在最下方
@@ -42,7 +43,7 @@ function syncInputs(node) {
 
 	// 只保留已连接的槽和唯一一个备用槽
 	const removable = inputs
-		.filter((input) => !input.link && inputNumber(input) !== spare)
+		.filter((input) => !isConnected(input) && inputNumber(input) !== spare)
 		.sort((a, b) => inputNumber(b) - inputNumber(a));
 
 	for (const input of removable) {
